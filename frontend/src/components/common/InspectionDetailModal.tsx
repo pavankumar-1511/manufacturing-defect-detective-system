@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { Inspection } from '../../types';
 import { StatusBadge, DefectTypeBadge } from './StatusBadge';
+import { getImageUrl } from '../../services/api';
 
 interface InspectionDetailModalProps {
   inspection: Inspection | null;
@@ -110,7 +111,7 @@ export const InspectionDetailModal: React.FC<InspectionDetailModalProps> = ({
               {viewMode === 'annotated' && (
                 <div className="relative max-h-[420px] flex items-center justify-center">
                   <img
-                    src={inspection.annotated_image_url || inspection.original_image_url}
+                    src={getImageUrl(inspection.annotated_image_url || inspection.original_image_url)}
                     alt="Annotated Inspection"
                     className="max-h-[400px] w-auto object-contain rounded-lg"
                   />
@@ -120,7 +121,7 @@ export const InspectionDetailModal: React.FC<InspectionDetailModalProps> = ({
               {viewMode === 'original' && (
                 <div className="relative max-h-[420px] flex items-center justify-center">
                   <img
-                    src={inspection.original_image_url}
+                    src={getImageUrl(inspection.original_image_url)}
                     alt="Original Upload"
                     className="max-h-[400px] w-auto object-contain rounded-lg"
                   />
@@ -132,7 +133,7 @@ export const InspectionDetailModal: React.FC<InspectionDetailModalProps> = ({
                   <div className="text-center">
                     <p className="text-xs text-slate-400 mb-1 font-medium">Original</p>
                     <img
-                      src={inspection.original_image_url}
+                      src={getImageUrl(inspection.original_image_url)}
                       alt="Original"
                       className="max-h-[360px] w-full object-contain rounded-lg bg-black/40"
                     />
@@ -140,7 +141,7 @@ export const InspectionDetailModal: React.FC<InspectionDetailModalProps> = ({
                   <div className="text-center">
                     <p className="text-xs text-blue-400 mb-1 font-medium">AI Defect Heatmap Overlay</p>
                     <img
-                      src={inspection.annotated_image_url || inspection.original_image_url}
+                      src={getImageUrl(inspection.annotated_image_url || inspection.original_image_url)}
                       alt="Annotated"
                       className="max-h-[360px] w-full object-contain rounded-lg bg-black/40"
                     />

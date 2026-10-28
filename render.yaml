@@ -1,9 +1,10 @@
 services:
+  # 1. FastAPI Python AI Backend Web Service
   - type: web
-    name: defect-detection-backend
+    name: manufacturing-defect-detective-system
     runtime: python
     plan: free
-    region: oregon
+    region: ohio
     rootDir: backend
     buildCommand: bash build.sh
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
@@ -15,3 +16,22 @@ services:
         value: sqlite:///./defect_detection.db
       - key: CORS_ORIGINS
         value: "*"
+
+  # 2. React Vite Frontend Web Application (Total Website)
+  - type: static
+    name: manufacturing-defect-ui
+    plan: free
+    region: ohio
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        fromService:
+          type: web
+          name: manufacturing-defect-detective-system
+          property: url

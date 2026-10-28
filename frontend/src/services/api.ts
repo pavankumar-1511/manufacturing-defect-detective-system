@@ -9,8 +9,17 @@ import {
   TrendPoint
 } from '../types';
 
+const RAW_API_URL = import.meta.env.VITE_API_URL;
+export const API_BASE_URL = RAW_API_URL ? RAW_API_URL.replace(/\/+$/, '') : '';
+
+export const getImageUrl = (url?: string | null): string => {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  return `${API_BASE_URL}${url}`;
+};
+
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: API_BASE_URL ? `${API_BASE_URL}/api` : '/api',
   timeout: 30000,
 });
 
@@ -113,7 +122,7 @@ export const getExportCsvUrl = (filters?: {
   if (filters?.defect_type && filters.defect_type !== 'ALL') query.append('defect_type', filters.defect_type);
   if (filters?.date_from) query.append('date_from', filters.date_from);
   if (filters?.date_to) query.append('date_to', filters.date_to);
-  return `/api/inspections?${query.toString()}`;
+  return `${API_BASE_URL}/api/inspections?${query.toString()}`;
 };
 
 export default api;

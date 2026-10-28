@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { X, Printer, ShieldCheck, CheckCircle2, AlertOctagon, AlertTriangle } from 'lucide-react';
 import { Inspection, InspectionReport } from '../../types';
-import { getInspectionReport } from '../../services/api';
+import { getInspectionReport, getImageUrl } from '../../services/api';
 
 interface PrintableReportModalProps {
   inspection: Inspection | null;
@@ -165,7 +165,7 @@ export const PrintableReportModal: React.FC<PrintableReportModalProps> = ({
                   Original Captured Part
                 </span>
                 <img
-                  src={inspection.original_image_url}
+                  src={getImageUrl(inspection.original_image_url)}
                   alt="Original"
                   className="max-h-56 mx-auto object-contain rounded"
                 />
@@ -176,7 +176,7 @@ export const PrintableReportModal: React.FC<PrintableReportModalProps> = ({
                   AI Defect Localization Heatmap
                 </span>
                 <img
-                  src={inspection.annotated_image_url || inspection.original_image_url}
+                  src={getImageUrl(inspection.annotated_image_url || inspection.original_image_url)}
                   alt="Annotated"
                   className="max-h-56 mx-auto object-contain rounded"
                 />

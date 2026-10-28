@@ -48,6 +48,7 @@ import {
   getInspections,
   getModelStatus,
   getExportCsvUrl,
+  getImageUrl,
 } from '../services/api';
 import { StatusBadge, DefectTypeBadge } from '../components/common/StatusBadge';
 
@@ -746,7 +747,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                         title="Click to view full inspection"
                       >
                         <img
-                          src={item.annotated_image_url || item.original_image_url}
+                          src={getImageUrl(item.annotated_image_url || item.original_image_url)}
                           alt={item.original_filename}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                         />

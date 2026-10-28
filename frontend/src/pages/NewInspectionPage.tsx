@@ -14,7 +14,7 @@ import {
   Cpu,
   ArrowRight,
 } from 'lucide-react';
-import { createInspection } from '../services/api';
+import { createInspection, getImageUrl } from '../services/api';
 import { Inspection } from '../types';
 import { StatusBadge, DefectTypeBadge } from '../components/common/StatusBadge';
 
@@ -228,11 +228,11 @@ export const NewInspectionPage: React.FC<NewInspectionPageProps> = ({
 
             <div className="p-6 bg-slate-950 flex items-center justify-center min-h-[380px]">
               <img
-                src={
+                src={getImageUrl(
                   imageTab === 'annotated'
                     ? result.annotated_image_url || result.original_image_url
                     : result.original_image_url
-                }
+                )}
                 alt="Inspection Output"
                 className="max-h-[440px] w-auto object-contain rounded-lg border border-slate-800"
               />

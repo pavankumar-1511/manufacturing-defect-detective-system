@@ -12,7 +12,7 @@ import {
   Layers,
 } from 'lucide-react';
 import { Inspection, PaginatedInspections } from '../types';
-import { getInspections, deleteInspection, getExportCsvUrl } from '../services/api';
+import { getInspections, deleteInspection, getExportCsvUrl, getImageUrl } from '../services/api';
 import { StatusBadge, DefectTypeBadge } from '../components/common/StatusBadge';
 
 interface HistoryPageProps {
@@ -241,7 +241,7 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({
                     <td className="py-2.5 px-4">
                       <div className="w-10 h-10 rounded-md bg-slate-100 overflow-hidden border border-slate-200 flex-shrink-0">
                         <img
-                          src={item.annotated_image_url || item.original_image_url}
+                          src={getImageUrl(item.annotated_image_url || item.original_image_url)}
                           alt={item.original_filename}
                           className="w-full h-full object-cover"
                         />
