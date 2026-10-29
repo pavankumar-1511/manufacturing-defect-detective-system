@@ -6,6 +6,7 @@ import cv2
 from datetime import datetime, timezone, timedelta
 from app.config import settings
 from app.database.session import SessionLocal
+from app.database.mongodb import is_mongo_enabled, get_mongo_inspections_collection
 from app.models.inspection import Inspection
 from app.services.inference.detector import pipeline
 
@@ -71,7 +72,52 @@ def create_sample_industrial_images():
     return created_files
 
 def seed_database_if_empty():
-    """Seeds the SQLite database with realistic initial records if empty."""
+    """Seeds the database (MongoDB or SQLite) with realistic initial records if empty."""
+    if is_mongo_enabled():
+        try:
+            col = get_mongo_inspections_collection()
+            if col.count_documents({}) > 0:
+                return
+            create_sample_industrial_images()
+            now = datetime.now(timezone.utc)
+            seed_records = [
+                {"orig": "part_bracket_A101.png", "file": "sample_pristine_bracket.png", "batch": "LOT-2026-A101", "notes": "Machined bracket passed automated dimensional and surface check.", "days_ago": 6},
+                {"orig": "housing_panel_B204.png", "file": "sample_surface_scratch.png", "batch": "LOT-2026-B204", "notes": "Surface scratch detected across central mounting flange.", "days_ago": 5},
+                {"orig": "cast_flange_C308.png", "file": "sample_metal_crack.png", "batch": "LOT-2026-C308", "notes": "Critical hairline fracture detected. Part rejected.", "days_ago": 3},
+                {"orig": "cover_plate_D412.png", "file": "sample_stamped_dent.png", "batch": "LOT-2026-D412", "notes": "Stamped depression exceeds tolerance. Marked for rework.", "days_ago": 2},
+                {"orig": "bearing_seal_E516.png", "file": "sample_surface_abnormality.png", "batch": "LOT-2026-E516", "notes": "Discoloration and porosity noted on perimeter.", "days_ago": 1},
+                {"orig": "turbine_blade_F620.png", "file": "sample_pristine_bracket.png", "batch": "LOT-2026-F620", "notes": "Surface integrity validated with zero defects.", "days_ago": 0}
+            ]
+            for s in seed_records:
+                stored_path = settings.ORIGINAL_UPLOAD_DIR / s["file"]
+                if stored_path.exists():
+                    res = pipeline.inspect_image(stored_path)
+                    annotated_name = f"annotated_{s['file']}"
+                    annotated_path = settings.ANNOTATED_UPLOAD_DIR / annotated_name
+                    if "annotated_image_np" in res:
+                        cv2.imwrite(str(annotated_path), res["annotated_image_np"])
+                    col.insert_one({
+                        "id": str(uuid.uuid4()),
+                        "original_filename": s["orig"],
+                        "stored_filename": s["file"],
+                        "annotated_filename": annotated_name,
+                        "product_id": s["batch"],
+                        "status": res["status"],
+                        "defect_type": res["defect_type"],
+                        "confidence_score": res["confidence_score"],
+                        "model_name": res["model_name"],
+                        "model_version": res["model_version"],
+                        "inference_duration_ms": res["inference_duration_ms"],
+                        "manual_review_required": res["manual_review_required"],
+                        "inspection_notes": s["notes"],
+                        "defect_regions": json.dumps(res.get("defect_regions", [])),
+                        "created_at": now - timedelta(days=s["days_ago"], hours=s["days_ago"] * 2)
+                    })
+        except Exception as e:
+            print(f"Error during initial MongoDB seed: {e}")
+        return
+
+    # SQLite Seeding
     db = SessionLocal()
     try:
         count = db.query(Inspection).count()

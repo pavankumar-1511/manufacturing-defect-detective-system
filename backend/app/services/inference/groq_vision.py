@@ -131,3 +131,4 @@ def analyze_with_groq_vision(image_path: Path) -> Optional[Dict[str, Any]]:
     except Exception as e:
         logger.warning(f"Groq Vision inference failed: {e}. Falling back to local pipeline.")
         return None
+

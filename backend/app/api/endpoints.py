@@ -1,7 +1,7 @@
 import json
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List
+from typing import Optional, List, Any
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status, Response
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
@@ -9,6 +9,8 @@ from sqlalchemy import func, desc, or_
 import cv2
 
 from app.database.session import get_db
+from app.database.repo import DatabaseRepository
+from app.database.mongodb import is_mongo_enabled
 from app.models.inspection import Inspection
 from app.schemas.inspection import (
     InspectionResponse,
@@ -32,11 +34,11 @@ from app.config import settings
 logger = logging.getLogger("api_endpoints")
 router = APIRouter()
 
-def format_inspection_response(item: Inspection, base_url: str = "") -> dict:
+def format_inspection_response(item: Any, base_url: str = "") -> dict:
     regions = []
     if item.defect_regions:
         try:
-            regions_data = json.loads(item.defect_regions)
+            regions_data = json.loads(item.defect_regions) if isinstance(item.defect_regions, str) else item.defect_regions
             regions = [DefectRegion(**r) for r in regions_data]
         except Exception:
             regions = []
@@ -66,112 +68,33 @@ def format_inspection_response(item: Inspection, base_url: str = "") -> dict:
     }
 
 @router.get("/health", tags=["System"])
-def get_health():
+def get_health(db: Session = Depends(get_db)):
     """Health check endpoint to verify backend operational readiness."""
+    db_ok = DatabaseRepository.is_connected(db)
     return {
-        "status": "healthy",
+        "status": "healthy" if db_ok else "degraded",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "service": settings.PROJECT_NAME,
         "version": settings.MODEL_VERSION,
-        "database": "connected",
+        "database": "connected" if db_ok else "disconnected",
+        "database_type": "MongoDB Atlas" if is_mongo_enabled() else "SQLite",
         "model_engine": "ready" if pipeline.is_configured else "baseline"
     }
 
 @router.get("/dashboard/stats", response_model=DashboardStats, tags=["Dashboard"])
 def get_dashboard_stats(db: Session = Depends(get_db)):
     """Computes live inspection metrics from database records."""
-    total = db.query(Inspection).count()
-    if total == 0:
-        return DashboardStats(
-            total_inspections=0,
-            accepted_count=0,
-            defective_count=0,
-            review_required_count=0,
-            defect_percentage=0.0,
-            manual_review_percentage=0.0,
-            avg_inference_time_ms=0.0,
-        )
-
-    accepted = db.query(Inspection).filter(Inspection.status == "ACCEPTED").count()
-    defective = db.query(Inspection).filter(Inspection.status == "DEFECTIVE").count()
-    review = db.query(Inspection).filter(Inspection.status == "REVIEW_REQUIRED").count()
-    
-    avg_duration = db.query(func.avg(Inspection.inference_duration_ms)).scalar() or 0.0
-
-    return DashboardStats(
-        total_inspections=total,
-        accepted_count=accepted,
-        defective_count=defective,
-        review_required_count=review,
-        defect_percentage=round((defective / total) * 100.0, 1),
-        manual_review_percentage=round((review / total) * 100.0, 1),
-        avg_inference_time_ms=round(float(avg_duration), 1),
-    )
+    return DatabaseRepository.get_dashboard_stats(db)
 
 @router.get("/dashboard/trends", response_model=List[TrendPoint], tags=["Dashboard"])
 def get_inspection_trends(days: int = Query(7, ge=1, le=90), db: Session = Depends(get_db)):
     """Returns inspection volume trends aggregated by day."""
-    start_date = datetime.now(timezone.utc) - timedelta(days=days - 1)
-    
-    # Query inspections in window
-    records = (
-        db.query(Inspection)
-        .filter(Inspection.created_at >= start_date)
-        .order_by(Inspection.created_at.asc())
-        .all()
-    )
-
-    # Group by date string YYYY-MM-DD
-    trend_map = {}
-    for i in range(days):
-        d = (start_date + timedelta(days=i)).strftime("%Y-%m-%d")
-        trend_map[d] = {"date": d, "total": 0, "accepted": 0, "defective": 0, "review": 0}
-
-    for item in records:
-        d_str = item.created_at.strftime("%Y-%m-%d")
-        if d_str in trend_map:
-            trend_map[d_str]["total"] += 1
-            if item.status == "ACCEPTED":
-                trend_map[d_str]["accepted"] += 1
-            elif item.status == "DEFECTIVE":
-                trend_map[d_str]["defective"] += 1
-            elif item.status == "REVIEW_REQUIRED":
-                trend_map[d_str]["review"] += 1
-
-    return [TrendPoint(**v) for v in trend_map.values()]
+    return DatabaseRepository.get_trends(days=days, db=db)
 
 @router.get("/dashboard/defect-distribution", response_model=List[DefectDistributionItem], tags=["Dashboard"])
 def get_defect_distribution(db: Session = Depends(get_db)):
     """Computes defect category distribution for defective & review records."""
-    total_defects = db.query(Inspection).filter(Inspection.defect_type.isnot(None)).count()
-    if total_defects == 0:
-        # Return standard categories with 0%
-        return [DefectDistributionItem(category=cat, count=0, percentage=0.0) for cat in pipeline.SUPPORTED_CATEGORIES]
-
-    distribution = (
-        db.query(Inspection.defect_type, func.count(Inspection.id))
-        .filter(Inspection.defect_type.isnot(None))
-        .group_by(Inspection.defect_type)
-        .all()
-    )
-
-    results = []
-    found_cats = set()
-    for cat, cnt in distribution:
-        if cat:
-            found_cats.add(cat)
-            results.append(DefectDistributionItem(
-                category=cat,
-                count=cnt,
-                percentage=round((cnt / total_defects) * 100.0, 1)
-            ))
-
-    # Add missing supported categories with 0 for chart completeness
-    for cat in pipeline.SUPPORTED_CATEGORIES:
-        if cat not in found_cats:
-            results.append(DefectDistributionItem(category=cat, count=0, percentage=0.0))
-
-    return results
+    return DatabaseRepository.get_defect_distribution(db)
 
 @router.post("/inspections", response_model=InspectionResponse, status_code=status.HTTP_201_CREATED, tags=["Inspections"])
 async def create_inspection(
@@ -214,26 +137,26 @@ async def create_inspection(
         groq_desc = f"[AI Diagnosis]: {inference_result['ai_description']}"
         final_notes = f"{final_notes} | {groq_desc}" if final_notes else groq_desc
 
-    # Persist to SQLite Database
-    db_item = Inspection(
-        original_filename=orig_name,
-        stored_filename=safe_stored_name,
-        annotated_filename=annotated_filename,
-        product_id=product_id.strip() if product_id else None,
-        status=inference_result["status"],
-        defect_type=inference_result["defect_type"],
-        confidence_score=inference_result["confidence_score"],
-        model_name=inference_result["model_name"],
-        model_version=inference_result["model_version"],
-        inference_duration_ms=inference_result["inference_duration_ms"],
-        manual_review_required=inference_result["manual_review_required"],
-        inspection_notes=final_notes,
-        defect_regions=json.dumps(inference_result.get("defect_regions", []))
-    )
-    db.add(db_item)
-    db.commit()
-    db.refresh(db_item)
-
+    # Persist via Database Repository (MongoDB Atlas or SQLite)
+    import uuid
+    inspection_data = {
+        "id": str(uuid.uuid4()),
+        "original_filename": orig_name,
+        "stored_filename": safe_stored_name,
+        "annotated_filename": annotated_filename,
+        "product_id": product_id.strip() if product_id else None,
+        "status": inference_result["status"],
+        "defect_type": inference_result["defect_type"],
+        "confidence_score": inference_result["confidence_score"],
+        "model_name": inference_result["model_name"],
+        "model_version": inference_result["model_version"],
+        "inference_duration_ms": inference_result["inference_duration_ms"],
+        "manual_review_required": inference_result["manual_review_required"],
+        "inspection_notes": final_notes,
+        "defect_regions": json.dumps(inference_result.get("defect_regions", [])),
+        "created_at": datetime.now(timezone.utc)
+    }
+    db_item = DatabaseRepository.save_inspection(inspection_data, db)
     return format_inspection_response(db_item)
 
 @router.get("/inspections", tags=["Inspections"])
@@ -251,44 +174,11 @@ def get_inspections(
     """
     Returns paginated inspections with searching, filtering, and optional CSV export.
     """
-    query = db.query(Inspection)
-
-    if search:
-        search_filter = f"%{search.strip()}%"
-        query = query.filter(
-            or_(
-                Inspection.original_filename.ilike(search_filter),
-                Inspection.product_id.ilike(search_filter),
-                Inspection.inspection_notes.ilike(search_filter)
-            )
-        )
-
-    if status and status.upper() in {"ACCEPTED", "DEFECTIVE", "REVIEW_REQUIRED"}:
-        query = query.filter(Inspection.status == status.upper())
-
-    if defect_type and defect_type != "ALL":
-        query = query.filter(Inspection.defect_type == defect_type)
-
-    if date_from:
-        try:
-            d_from = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc)
-            query = query.filter(Inspection.created_at >= d_from)
-        except ValueError:
-            pass
-
-    if date_to:
-        try:
-            d_to = datetime.fromisoformat(date_to).replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
-            query = query.filter(Inspection.created_at <= d_to)
-        except ValueError:
-            pass
-
-    # Order newest first
-    query = query.order_by(desc(Inspection.created_at))
-
-    # If CSV Export requested
     if export_csv:
-        all_filtered = query.all()
+        all_filtered = DatabaseRepository.get_all_for_csv(
+            search=search, status=status, defect_type=defect_type,
+            date_from=date_from, date_to=date_to, db=db
+        )
         csv_data = generate_inspections_csv(all_filtered)
         return PlainTextResponse(
             content=csv_data,
@@ -296,9 +186,10 @@ def get_inspections(
             headers={"Content-Disposition": "attachment; filename=inspection_history_export.csv"}
         )
 
-    # Pagination
-    total = query.count()
-    items = query.offset((page - 1) * page_size).limit(page_size).all()
+    items, total = DatabaseRepository.get_paginated_inspections(
+        search=search, status=status, defect_type=defect_type,
+        date_from=date_from, date_to=date_to, page=page, page_size=page_size, db=db
+    )
     total_pages = max(1, (total + page_size - 1) // page_size)
 
     return {
@@ -312,7 +203,7 @@ def get_inspections(
 @router.get("/inspections/{inspection_id}", response_model=InspectionResponse, tags=["Inspections"])
 def get_inspection_by_id(inspection_id: str, db: Session = Depends(get_db)):
     """Fetch a single inspection record by UUID."""
-    item = db.query(Inspection).filter(Inspection.id == inspection_id).first()
+    item = DatabaseRepository.get_inspection_by_id(inspection_id, db)
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection record not found")
     return format_inspection_response(item)
@@ -320,7 +211,7 @@ def get_inspection_by_id(inspection_id: str, db: Session = Depends(get_db)):
 @router.delete("/inspections/{inspection_id}", status_code=status.HTTP_200_OK, tags=["Inspections"])
 def delete_inspection(inspection_id: str, db: Session = Depends(get_db)):
     """Deletes an inspection record and its associated images from disk."""
-    item = db.query(Inspection).filter(Inspection.id == inspection_id).first()
+    item = DatabaseRepository.get_inspection_by_id(inspection_id, db)
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection record not found")
 
@@ -336,21 +227,21 @@ def delete_inspection(inspection_id: str, db: Session = Depends(get_db)):
     except Exception as e:
         logger.warning(f"Error cleaning files for inspection {inspection_id}: {e}")
 
-    db.delete(item)
-    db.commit()
+    DatabaseRepository.delete_inspection(inspection_id, db)
     return {"message": "Inspection record deleted successfully", "id": inspection_id}
 
 @router.get("/inspections/{inspection_id}/report", response_model=InspectionReport, tags=["Inspections"])
 def get_inspection_report(inspection_id: str, db: Session = Depends(get_db)):
     """Generates an official industrial quality inspection report."""
-    item = db.query(Inspection).filter(Inspection.id == inspection_id).first()
+    item = DatabaseRepository.get_inspection_by_id(inspection_id, db)
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection record not found")
 
     regions = []
     if item.defect_regions:
         try:
-            regions = [DefectRegion(**r) for r in json.loads(item.defect_regions)]
+            regions_data = json.loads(item.defect_regions) if isinstance(item.defect_regions, str) else item.defect_regions
+            regions = [DefectRegion(**r) for r in regions_data]
         except Exception:
             regions = []
 
