@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     ALLOWED_MIME_TYPES: set[str] = {"image/jpeg", "image/png", "image/jpg"}
     
     # CORS
-    CORS_ORIGINS: list[str] = [
+    CORS_ORIGINS: Union[list[str], str] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:3000",
