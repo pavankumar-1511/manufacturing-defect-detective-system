@@ -6,6 +6,7 @@ from typing import Tuple, List, Optional, Dict, Any
 import numpy as np
 import cv2
 from PIL import Image
+from app.services.inference.groq_vision import analyze_with_groq_vision
 
 logger = logging.getLogger("defect_detector")
 
@@ -214,23 +215,40 @@ class DefectDetectionPipeline:
         else:
             combined_score = 0.05
 
-        # Determine overall product status and defect category
-        if len(defect_regions) == 0 or combined_score < defect_threshold:
-            status = "ACCEPTED"
-            primary_defect = None
-            # For accepted product, confidence is integrity score
-            confidence = round(float(1.0 - combined_score * 0.5), 3)
-            manual_review_required = False
-        elif combined_score < review_threshold:
-            status = "REVIEW_REQUIRED"
-            primary_defect = max(defect_type_votes, key=defect_type_votes.get) if defect_type_votes else "Surface Abnormalities"
-            confidence = round(float(combined_score), 3)
-            manual_review_required = True
+        # Multi-modal AI Vision Scanning (Groq Qwen 3.8 27B Vision)
+        groq_result = analyze_with_groq_vision(image_path)
+        ai_description = None
+        current_model_name = self.model_name
+
+        if groq_result:
+            current_model_name = f"{groq_result['model_name']} + ResNet-CV"
+            ai_description = groq_result.get("analysis")
+            status = groq_result["status"]
+            primary_defect = groq_result["defect_type"]
+            confidence = groq_result["confidence_score"]
+            manual_review_required = (status == "REVIEW_REQUIRED")
+
+            # Harmonize defect region bounding box labels
+            if primary_defect and defect_regions:
+                for reg in defect_regions:
+                    reg["label"] = primary_defect
         else:
-            status = "DEFECTIVE"
-            primary_defect = max(defect_type_votes, key=defect_type_votes.get) if defect_type_votes else "Surface Abnormalities"
-            confidence = round(float(combined_score), 3)
-            manual_review_required = False
+            # Baseline: Local PyTorch ResNet + Morphological CV Pipeline
+            if len(defect_regions) == 0 or combined_score < defect_threshold:
+                status = "ACCEPTED"
+                primary_defect = None
+                confidence = round(float(1.0 - combined_score * 0.5), 3)
+                manual_review_required = False
+            elif combined_score < review_threshold:
+                status = "REVIEW_REQUIRED"
+                primary_defect = max(defect_type_votes, key=defect_type_votes.get) if defect_type_votes else "Surface Abnormalities"
+                confidence = round(float(combined_score), 3)
+                manual_review_required = True
+            else:
+                status = "DEFECTIVE"
+                primary_defect = max(defect_type_votes, key=defect_type_votes.get) if defect_type_votes else "Surface Abnormalities"
+                confidence = round(float(combined_score), 3)
+                manual_review_required = False
 
         # Annotate image with defect regions
         self._annotate_image(annotated_bgr, defect_regions, status, primary_defect, confidence)
@@ -245,9 +263,10 @@ class DefectDetectionPipeline:
             "inference_duration_ms": inference_duration_ms,
             "manual_review_required": manual_review_required,
             "annotated_image_np": annotated_bgr,
-            "model_name": self.model_name,
+            "model_name": current_model_name,
             "model_version": self.version,
-            "model_configured": self.is_configured
+            "model_configured": self.is_configured,
+            "ai_description": ai_description
         }
 
     def _annotate_image(

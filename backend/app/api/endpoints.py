@@ -208,6 +208,12 @@ async def create_inspection(
     # Track inference in registry
     model_registry.record_inference()
 
+    # Format inspection notes with AI vision description if available
+    final_notes = notes.strip() if notes else None
+    if inference_result.get("ai_description"):
+        groq_desc = f"[AI Diagnosis]: {inference_result['ai_description']}"
+        final_notes = f"{final_notes} | {groq_desc}" if final_notes else groq_desc
+
     # Persist to SQLite Database
     db_item = Inspection(
         original_filename=orig_name,
@@ -221,7 +227,7 @@ async def create_inspection(
         model_version=inference_result["model_version"],
         inference_duration_ms=inference_result["inference_duration_ms"],
         manual_review_required=inference_result["manual_review_required"],
-        inspection_notes=notes.strip() if notes else None,
+        inspection_notes=final_notes,
         defect_regions=json.dumps(inference_result.get("defect_regions", []))
     )
     db.add(db_item)

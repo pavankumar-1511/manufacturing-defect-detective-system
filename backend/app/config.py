@@ -1,10 +1,13 @@
 from pathlib import Path
-from typing import Union
+from typing import Union, Optional
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=(Path(__file__).resolve().parent.parent / ".env", ".env"),
+        extra="ignore"
+    )
 
     PROJECT_NAME: str = "AI-Based Manufacturing Defect Detection System"
     API_V1_PREFIX: str = "/api"
@@ -52,6 +55,10 @@ class Settings(BaseSettings):
     DEFECT_CONFIDENCE_THRESHOLD: float = 0.50
     REVIEW_REQUIRED_THRESHOLD: float = 0.65
     FORCE_BASELINE: bool = False
+
+    # Groq Multimodal AI Vision Scanner
+    GROQ_API_KEY: Optional[str] = None
+    GROQ_MODEL: str = "qwen/qwen3.8-27b"
 
 settings = Settings()
 
